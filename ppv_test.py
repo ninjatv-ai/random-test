@@ -1,49 +1,106 @@
 from playwright.sync_api import sync_playwright
+import json
 
-TARGET = "https://ppv.to/live/wc/2026-06-15/esp-cpv"
+EMBED_URL = "https://embedindia.st/embed/mlb/2026-06-15/mia-phi"
 
 with sync_playwright() as p:
+
     browser = p.chromium.launch(
         headless=True,
         args=[
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox"
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled"
         ]
     )
 
-    page = browser.new_page(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+    context = browser.new_context(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        viewport={"width": 1920, "height": 1080}
     )
 
-    page.add_init_script("""
-Object.defineProperty(navigator, 'webdriver', {
-    get: () => undefined
-});
+    page = context.new_page()
 
-Object.defineProperty(navigator, 'platform', {
-    get: () => 'Win32'
-});
+    page.goto(
+        EMBED_URL,
+        wait_until="domcontentloaded",
+        timeout=60000
+    )
 
-Object.defineProperty(navigator, 'languages', {
-    get: () => ['en-US','en']
-});
-""")
+    page.wait_for_timeout(15000)
 
-    found = set()
+    print("\nTITLE:")
+    print(page.title())
 
-    def on_response(resp):
-        url = resp.url
+    print("\nBROWSER INFO:")
+    info = page.evaluate("""
+    () => ({
+        ua: navigator.userAgent,
+        platform: navigator.platform,
+        webdriver: navigator.webdriver,
+        ready: document.readyState
+    })
+    """)
+    print(json.dumps(info, indent=2))
 
-        if ".m3u8" in url:
-            found.add(url)
-            print("M3U8:", url)
+    print("\nWINDOW KEYS:")
+    keys = page.evaluate("""
+    () => Object.keys(window).filter(x =>
+        x.toLowerCase().includes('jw') ||
+        x.toLowerCase().includes('wasm')
+    )
+    """)
+    print(keys)
 
-    page.on("response", on_response)
+    print("\nWASM TYPE:")
+    print(
+        page.evaluate(
+            "() => typeof window.__wasm_jw_player"
+        )
+    )
 
-    page.goto(TARGET, wait_until="domcontentloaded")
+    print("\nJW TYPE:")
+    print(
+        page.evaluate(
+            "() => typeof window.jwplayer"
+        )
+    )
 
-    page.wait_for_timeout(30000)
+    print("\nDIRECT M3U8:")
+    m3u8 = page.evaluate("""
+    () => {
+        try {
 
-    print("\nTOTAL:", len(found))
+            if (!window.__wasm_jw_player)
+                return null;
+
+            const p = window.__wasm_jw_player.getPlaylist();
+
+            if (!p || !p.length)
+                return null;
+
+            if (p[0].file)
+                return p[0].file;
+
+            if (
+                p[0].sources &&
+                p[0].sources.length &&
+                p[0].sources[0].file
+            )
+                return p[0].sources[0].file;
+
+            return null;
+
+        } catch(e) {
+            return "ERROR: " + e.toString();
+        }
+    }
+    """)
+    print(m3u8)
+
+    print("\nBODY SAMPLE:")
+    body = page.evaluate(
+        "() => document.body.innerText"
+    )
+    print(body[:2000])
 
     browser.close()
